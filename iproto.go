@@ -54,7 +54,7 @@ func (conn *IProto) Request(requestType int32, body *bytes.Buffer) (response *Re
 func (conn *IProto) pack(requestType int32, body *bytes.Buffer) (packet *bytes.Buffer, err error) {	
 	// Each request should have uniq RequestID
 	conn.requestID++
-	// And t should not get out of 32 bits
+	// And it should not get out of 32 bits
 	if conn.requestID >= 1<<31 - 1 {
 		conn.requestID = 1
 	}
