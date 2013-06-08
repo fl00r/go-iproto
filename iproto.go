@@ -1,7 +1,6 @@
 package iproto
 
 import (
-	// "fmt"
 	"bytes"
 	"encoding/binary"
 	"net"
@@ -110,9 +109,5 @@ func (conn *IProto) recv() (response *Response, err error) {
 	}
 
 	response = &Response{ requestType, bodyLength, requestID, responseCode, bytes.NewBuffer(bodyBuf) }
-	if err != nil {
-		return
-	}
-
 	return
 }
