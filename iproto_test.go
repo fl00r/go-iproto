@@ -12,8 +12,14 @@ func TestConnect(t *testing.T) {
 	}
 
 	var rid int32 = 17
-	_, err = conn.Request(rid, new(bytes.Buffer))
+	response, err := conn.Request(rid, new(bytes.Buffer))
 	if err != nil {
 		t.Errorf("Error: %s", err.Error())
+	}
+	if response.requestType != rid {
+		t.Errorf("Error: requestType should be %d, not %d", rid, response.requestType)
+	}
+	if response.requestID != 1 {
+		t.Errorf("Error: requestID should be %d, not %d", 1, response.requestID)
 	}
 }

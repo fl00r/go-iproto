@@ -16,7 +16,6 @@ type Response struct {
 	requestType  int32
 	bodyLength   int32
 	requestID    int32
-	returnCode   int32
 	responseBody *bytes.Buffer
 }
 
@@ -82,24 +81,23 @@ func (conn *IProto) send(packet *bytes.Buffer) (err error) {
 }
 
 func (conn *IProto) recv() (response *Response, err error) {
-	headerBuf := make([]byte, 16)
-	// Read header 16 bytes (12 + responseCode)
+	headerBuf := make([]byte, 12)
+	// Read header (12 bytes)
 	_, err = conn.connection.Read(headerBuf)
 	if err != nil {
 		return
 	}
 
 	// Unpack data
-	res := make([]int32, 4)
+	res := make([]int32, 3)
 	err = binary.Read(bytes.NewBuffer(headerBuf), binary.LittleEndian, &res)
 
 	requestType  := res[0]
 	bodyLength   := res[1]
 	requestID    := res[2]
-	responseCode := res[3]
 
 	// Read body
-	bodyRest := bodyLength - 4
+	bodyRest := bodyLength
 	bodyBuf  := make([]byte, bodyRest)
 	if bodyRest > 0 {
 		_, err = conn.connection.Read(bodyBuf)
@@ -108,6 +106,6 @@ func (conn *IProto) recv() (response *Response, err error) {
 		}
 	}
 
-	response = &Response{ requestType, bodyLength, requestID, responseCode, bytes.NewBuffer(bodyBuf) }
+	response = &Response{ requestType, bodyLength, requestID, bytes.NewBuffer(bodyBuf) }
 	return
 }
