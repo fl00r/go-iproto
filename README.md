@@ -25,7 +25,7 @@ func main() {
 	body := new(bytes.Buffer)
 
 	conn := iproto.Connect("localhost:33013")
-	resp, err = conn.Request(100, body)
+	resp, err = conn.Request(requestID, body)
 
 	fmt.Println("requestType:",  resp.requestType)
 	fmt.Println("bodyLength:",   resp.bodyLength)
