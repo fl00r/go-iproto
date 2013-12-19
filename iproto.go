@@ -1,30 +1,35 @@
+/*
+	Asynchronous mail.ru iproto protocol implementation on Go.
+
+	Protocol description
+	<request> | <response> := <header><body>
+	<header> = <type:int32><body_length:int32><request_id:int32>
+
+	(c) 2013 Cergoo (forked from fl00r/go-iproto)
+	under terms of ISC license
+
+*/
 package iproto
 
 import (
 	"bytes"
 	"encoding/binary"
+	"math"
 	"net"
+	"sync/atomic"
 )
 
 type IProto struct {
-	addr        string
-	connection  *net.TCPConn
-	requestID   int32
-	requests    map[int32] chan *Response
-	writeChan   chan *Pack
+	addr       string
+	connection *net.TCPConn
+	requestID  int32
+	requests   []chan *Response
+	writeChan  chan []byte
 }
 
 type Response struct {
-	requestType int32
-	bodyLength  int32
-	requestID   int32
-	Body        *bytes.Buffer
-}
-
-type Pack struct {
-	requestID int32
-	chnl      chan *Response
-	packet    *bytes.Buffer
+	RequestType int32
+	Body        []byte
 }
 
 func Connect(addr string) (connection *IProto, err error) {
@@ -32,12 +37,19 @@ func Connect(addr string) (connection *IProto, err error) {
 	if err != nil {
 		return
 	}
-
 	conn, err := net.DialTCP("tcp", nil, raddr)
 	if err != nil {
 		return
 	}
-	connection = &IProto{ addr, conn, 0, make(map[int32] chan *Response), make(chan *Pack) }
+	connection = &IProto{
+		addr:       addr,
+		connection: conn,
+		requests:   make([]chan *Response, math.MaxInt32),
+		writeChan:  make(chan []byte),
+	}
+	for i := 0; i < math.MaxInt32; i++ {
+		connection.requests[i] = make(chan *Response)
+	}
 
 	go connection.read()
 	go connection.write()
@@ -45,83 +57,66 @@ func Connect(addr string) (connection *IProto, err error) {
 	return
 }
 
-func (conn *IProto) Request(requestType int32, body *bytes.Buffer) (response *Response, err error) {
-	packet, err := conn.pack(requestType, body)
+func (conn *IProto) Request(requestType int32, body []byte) (response *Response, err error) {
+	// create packet
+	packet := new(bytes.Buffer)
+	requestID := atomic.AddInt32(&conn.requestID, 1)
+	// write header in a packet
+	err = binary.Write(packet, binary.LittleEndian, []int32{requestType, int32(len(body)), requestID})
+	if err != nil {
+		return
+	}
+	// write body in a packet
+	_, err = packet.Write(body)
 	if err != nil {
 		return
 	}
 
-	ch := make(chan *Response)
-	pack := &Pack{ conn.requestID, ch, packet}
-	conn.writeChan <- pack
+	conn.writeChan <- packet.Bytes()
 
-	response = <- ch
-	return
-}
-
-func (conn *IProto) pack(requestType int32, body *bytes.Buffer) (packet *bytes.Buffer, err error) {	
-	conn.requestID++
-	if conn.requestID >= 1<<31 - 1 {
-		conn.requestID = 1
-	}
-	bodyLength := int32(body.Len())
-
-	header := [] int32 { requestType, bodyLength, conn.requestID }
-
-	packet = new(bytes.Buffer)
-	err = binary.Write(packet, binary.LittleEndian, header)
-	if err != nil {
-		return
-	}
-
-	_, err = packet.Write(body.Bytes())
+	response = <-conn.requests[requestID]
 	return
 }
 
 func (conn *IProto) read() {
-	res := make([]int32, 3)
+	var (
+		err error
+	)
+	/*
+		requestType = header[0]
+		bodyLength  = header[1]
+		requestID   = header[2]
+	*/
+	header := make([]int32, 3)
+	headerBuf := make([]byte, 12)
+	headerReader := bytes.NewReader(headerBuf)
 	for {
-		headerBuf := make([]byte, 12)
-		_, err := conn.connection.Read(headerBuf)
+		// read header
+		_, err = conn.connection.Read(headerBuf)
+		if err != nil {
+			panic(err)
+		}
+		err = binary.Read(headerReader, binary.LittleEndian, &header)
+		if err != nil {
+			panic(err)
+		}
+		// read body
+		bodyBuf := make([]byte, header[1])
+		_, err = conn.connection.Read(bodyBuf)
 		if err != nil {
 			panic(err)
 		}
 
-		err = binary.Read(bytes.NewBuffer(headerBuf), binary.LittleEndian, &res)
-		if err != nil {
-			panic(err)
-		}
-
-		requestType := res[0]
-		bodyLength  := res[1]
-		requestID   := res[2]
-
-		bodyRest := bodyLength
-		bodyBuf  := make([]byte, bodyRest)
-		if bodyRest > 0 {
-			_, err = conn.connection.Read(bodyBuf)
-			if err != nil {
-				panic(err)
-			}
-		}
-
-		response := &Response{ requestType, bodyLength, requestID, bytes.NewBuffer(bodyBuf) }
-
-		conn.requests[requestID] <- response
+		conn.requests[header[2]] <- &Response{header[0], bodyBuf}
 	}
 }
 
 func (conn *IProto) write() {
 	var (
-		pack *Pack
 		err error
 	)
-
 	for {
-		pack = <- conn.writeChan
-		conn.requests[pack.requestID] = pack.chnl
-
-		_, err = conn.connection.Write(pack.packet.Bytes())
+		_, err = conn.connection.Write(<-conn.writeChan)
 		if err != nil {
 			panic(err)
 		}

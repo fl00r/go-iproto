@@ -16,13 +16,12 @@ package main
 
 import (
 	"fmt"
-	"github.com/fl00r/go-iproto"
-	"bytes"
+	"github.com/Cergoo/go-iproto"
 )
 
 func main() {
 	var requestID int32 = 100
-	body := new(bytes.Buffer)
+	body := []byte("iproto test message")
 
 	conn := iproto.Connect("localhost:33013")
 	resp, err = conn.Request(requestID, body)
