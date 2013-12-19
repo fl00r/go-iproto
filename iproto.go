@@ -1,5 +1,6 @@
 /*
 	Asynchronous mail.ru iproto protocol implementation on Go.
+    NOT thread safe
 
 	Protocol description
 	<request> | <response> := <header><body>
@@ -14,16 +15,14 @@ package iproto
 import (
 	"bytes"
 	"encoding/binary"
-	"math"
 	"net"
-	"sync/atomic"
 )
 
 type IProto struct {
 	addr       string
 	connection *net.TCPConn
 	requestID  int32
-	requests   []chan *Response
+	requests   map[int32]chan *Response
 	writeChan  chan []byte
 }
 
@@ -44,11 +43,8 @@ func Connect(addr string) (connection *IProto, err error) {
 	connection = &IProto{
 		addr:       addr,
 		connection: conn,
-		requests:   make([]chan *Response, math.MaxInt32),
+		requests:   make(map[int32]chan *Response),
 		writeChan:  make(chan []byte),
-	}
-	for i := 0; i < math.MaxInt32; i++ {
-		connection.requests[i] = make(chan *Response)
 	}
 
 	go connection.read()
@@ -60,9 +56,9 @@ func Connect(addr string) (connection *IProto, err error) {
 func (conn *IProto) Request(requestType int32, body []byte) (response *Response, err error) {
 	// create packet
 	packet := new(bytes.Buffer)
-	requestID := atomic.AddInt32(&conn.requestID, 1)
+	conn.requestID++
 	// write header in a packet
-	err = binary.Write(packet, binary.LittleEndian, []int32{requestType, int32(len(body)), requestID})
+	err = binary.Write(packet, binary.LittleEndian, []int32{requestType, int32(len(body)), conn.requestID})
 	if err != nil {
 		return
 	}
@@ -72,9 +68,13 @@ func (conn *IProto) Request(requestType int32, body []byte) (response *Response,
 		return
 	}
 
+	conn.requests[conn.requestID] = make(chan *Response)
+	// send request
 	conn.writeChan <- packet.Bytes()
-
-	response = <-conn.requests[requestID]
+	// waiting response
+	response = <-conn.requests[conn.requestID]
+	// delete chanel
+	delete(conn.requests, conn.requestID)
 	return
 }
 
