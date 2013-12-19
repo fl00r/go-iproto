@@ -20,11 +20,11 @@ import (
 )
 
 func main() {
-	var requestID int32 = 100
+	var requestType int32 = 100
 	body := []byte("iproto test message")
 
 	conn := iproto.Connect("localhost:33013")
-	resp, err = conn.Request(requestID, body)
+	resp, err = conn.Request(requestType, body)
 
 	fmt.Println("responseBody:", resp.Body)
 }
