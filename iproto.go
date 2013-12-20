@@ -1,129 +1,177 @@
+/*
+	Asynchronous mail.ru iproto protocol implementation on Go.
+	Thread safe
+
+	Protocol description
+	<request> | <response> := <header><body>
+	<header> = <type:int32><body_length:int32><request_id:int32>
+
+	(c) 2013 Cergoo (forked from fl00r/go-iproto)
+	under terms of ISC license
+
+*/
 package iproto
 
 import (
 	"bytes"
 	"encoding/binary"
+	"github.com/Cergoo/cache"
 	"net"
+	"runtime"
+	"sync/atomic"
+	"time"
 )
 
 type IProto struct {
-	addr        string
-	connection  *net.TCPConn
-	requestID   int32
-	requests    map[int32] chan *Response
-	writeChan   chan *Pack
+	addr        string        //
+	connection  *net.TCPConn  //
+	requestID   uint32        // counter
+	chan_writer chan *Request // chanel to wtite
+	chan_stop   chan bool     // chanel to stop all gorutines
+	requests    cache.Cache   // requests storage
+}
+
+type Request struct {
+	RequestType uint32
+	Body        []byte
+	Chan        chan<- *Response
 }
 
 type Response struct {
-	requestType int32
-	bodyLength  int32
-	requestID   int32
-	Body        *bytes.Buffer
+	RequestType uint32
+	Body        []byte
 }
 
-type Pack struct {
-	requestID int32
-	chnl      chan *Response
-	packet    *bytes.Buffer
+// callback function on timeout response, return nil
+func callback(key *string, val *interface{}) {
+	var (
+		ch     chan *Response
+		isChan bool
+	)
+	ch, isChan = (*val).(chan *Response)
+	if isChan {
+		ch <- nil
+	}
 }
 
-func Connect(addr string) (connection *IProto, err error) {
+// constructor
+func Connect(addr string, timeout time.Duration) (connection *IProto, err error) {
 	raddr, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		return
 	}
-
 	conn, err := net.DialTCP("tcp", nil, raddr)
 	if err != nil {
 		return
 	}
-	connection = &IProto{ addr, conn, 0, make(map[int32] chan *Response), make(chan *Pack) }
+	connection = &IProto{
+		addr:        addr,
+		connection:  conn,
+		chan_writer: make(chan *Request, 100),
+		chan_stop:   make(chan bool),
+		requests:    cache.New(100, false, timeout, callback),
+	}
 
 	go connection.read()
 	go connection.write()
 
+	// destroy action
+	stopAllGorutines := func(t *IProto) {
+		close(t.chan_stop)
+	}
+	runtime.SetFinalizer(connection, stopAllGorutines)
+
 	return
 }
 
-func (conn *IProto) Request(requestType int32, body *bytes.Buffer) (response *Response, err error) {
-	packet, err := conn.pack(requestType, body)
-	if err != nil {
-		return
+// async request
+func (conn *IProto) RequestGo(requestType uint32, body []byte, ch chan<- *Response) {
+	conn.chan_writer <- &Request{
+		RequestType: requestType,
+		Body:        body,
+		Chan:        ch,
 	}
+}
 
+// sync request
+func (conn *IProto) Request(requestType uint32, body []byte) *Response {
 	ch := make(chan *Response)
-	pack := &Pack{ conn.requestID, ch, packet}
-	conn.writeChan <- pack
-
-	response = <- ch
-	return
-}
-
-func (conn *IProto) pack(requestType int32, body *bytes.Buffer) (packet *bytes.Buffer, err error) {	
-	conn.requestID++
-	if conn.requestID >= 1<<31 - 1 {
-		conn.requestID = 1
+	conn.chan_writer <- &Request{
+		RequestType: requestType,
+		Body:        body,
+		Chan:        ch,
 	}
-	bodyLength := int32(body.Len())
-
-	header := [] int32 { requestType, bodyLength, conn.requestID }
-
-	packet = new(bytes.Buffer)
-	err = binary.Write(packet, binary.LittleEndian, header)
-	if err != nil {
-		return
-	}
-
-	_, err = packet.Write(body.Bytes())
-	return
+	// waiting response
+	return <-ch
 }
 
 func (conn *IProto) read() {
-	res := make([]int32, 3)
+	var (
+		err    error
+		ch     chan<- *Response
+		isChan bool
+	)
+	/*
+		requestType = header[0]
+		bodyLength  = header[1]
+		requestID   = header[2]
+	*/
+	header := make([]uint32, 3)
+	headerBuf := make([]byte, 12)
+	headerReader := bytes.NewReader(headerBuf)
 	for {
-		headerBuf := make([]byte, 12)
-		_, err := conn.connection.Read(headerBuf)
-		if err != nil {
-			panic(err)
-		}
-
-		err = binary.Read(bytes.NewBuffer(headerBuf), binary.LittleEndian, &res)
-		if err != nil {
-			panic(err)
-		}
-
-		requestType := res[0]
-		bodyLength  := res[1]
-		requestID   := res[2]
-
-		bodyRest := bodyLength
-		bodyBuf  := make([]byte, bodyRest)
-		if bodyRest > 0 {
+		select {
+		case <-conn.chan_stop:
+			return
+		default:
+			// read header
+			_, err = conn.connection.Read(headerBuf)
+			if err != nil {
+				panic(err)
+			}
+			err = binary.Read(headerReader, binary.LittleEndian, &header)
+			if err != nil {
+				panic(err)
+			}
+			// read body
+			bodyBuf := make([]byte, header[1])
 			_, err = conn.connection.Read(bodyBuf)
 			if err != nil {
 				panic(err)
 			}
+
+			ch, isChan = conn.requests.Del(string(header[2])).(chan<- *Response)
+			if isChan {
+				ch <- &Response{header[0], bodyBuf}
+			}
 		}
-
-		response := &Response{ requestType, bodyLength, requestID, bytes.NewBuffer(bodyBuf) }
-
-		conn.requests[requestID] <- response
 	}
 }
 
 func (conn *IProto) write() {
 	var (
-		pack *Pack
-		err error
+		err       error
+		r         *Request
+		requestID uint32
+		buf       *bytes.Buffer
 	)
 
 	for {
-		pack = <- conn.writeChan
-		conn.requests[pack.requestID] = pack.chnl
-
-		_, err = conn.connection.Write(pack.packet.Bytes())
-		if err != nil {
-			panic(err)
+		select {
+		case <-conn.chan_stop:
+			return
+		case r = <-conn.chan_writer:
+			requestID = atomic.AddUint32(&conn.requestID, 1)
+			// write header in a packet
+			binary.Write(buf, binary.LittleEndian, []uint32{r.RequestType, uint32(len(r.Body)), requestID})
+			// write body in a packet
+			buf.Write(r.Body)
+			conn.requests.Set(string(requestID), r.Chan)
+			_, err = conn.connection.Write(buf.Bytes())
+			if err != nil {
+				panic(err)
+			}
+			buf.Reset()
 		}
 	}
 }
