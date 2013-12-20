@@ -23,12 +23,18 @@ import (
 )
 
 type IProto struct {
-	addr        string       //
-	connection  *net.TCPConn //
-	requestID   int32        // counter
-	chan_writer chan []byte  // chanel to wtite
-	chan_stop   chan bool    // chanel to stop all gorutines
-	requests    cache.Cache  // requests storage
+	addr        string        //
+	connection  *net.TCPConn  //
+	requestID   int32         // counter
+	chan_writer chan *Request // chanel to wtite
+	chan_stop   chan bool     // chanel to stop all gorutines
+	requests    cache.Cache   // requests storage
+}
+
+type Request struct {
+	RequestType int32
+	Body        []byte
+	Chan        chan *Response
 }
 
 type Response struct {
@@ -61,7 +67,7 @@ func Connect(addr string, timeout time.Duration) (connection *IProto, err error)
 	connection = &IProto{
 		addr:        addr,
 		connection:  conn,
-		chan_writer: make(chan []byte, 100),
+		chan_writer: make(chan *Request, 100),
 		chan_stop:   make(chan bool),
 		requests:    cache.New(100, false, timeout, callback),
 	}
@@ -81,7 +87,11 @@ func Connect(addr string, timeout time.Duration) (connection *IProto, err error)
 // async request
 func (conn *IProto) RequestGo(requestType int32, body []byte) <-chan *Response {
 	ch := make(chan *Response, 2)
-	conn.send(requestType, body, ch)
+	conn.chan_writer <- &Request{
+		RequestType: requestType,
+		Body:        body,
+		Chan:        ch,
+	}
 	// no waiting response
 	return ch
 }
@@ -89,22 +99,13 @@ func (conn *IProto) RequestGo(requestType int32, body []byte) <-chan *Response {
 // sync request
 func (conn *IProto) Request(requestType int32, body []byte) *Response {
 	ch := make(chan *Response)
-	conn.send(requestType, body, ch)
+	conn.chan_writer <- &Request{
+		RequestType: requestType,
+		Body:        body,
+		Chan:        ch,
+	}
 	// waiting response
 	return <-ch
-}
-
-// create packet (header + body) and send
-func (conn *IProto) send(requestType int32, body []byte, chanToResponse chan *Response) {
-	packet := bytes.NewBuffer(make([]byte, 12+len(body)))
-	requestID := atomic.AddInt32(&conn.requestID, 1)
-	// write header in a packet
-	binary.Write(packet, binary.LittleEndian, []int32{requestType, int32(len(body)), requestID})
-	// write body in a packet
-	packet.Write(body)
-	conn.requests.Set(string(requestID), chanToResponse)
-	// send request
-	conn.chan_writer <- packet.Bytes()
 }
 
 func (conn *IProto) read() {
@@ -152,17 +153,28 @@ func (conn *IProto) read() {
 
 func (conn *IProto) write() {
 	var (
-		err error
+		err       error
+		r         *Request
+		requestID int32
+		buf       *bytes.Buffer
 	)
+
 	for {
 		select {
 		case <-conn.chan_stop:
 			return
-		default:
-			_, err = conn.connection.Write(<-conn.chan_writer)
+		case r = <-conn.chan_writer:
+			requestID = atomic.AddInt32(&conn.requestID, 1)
+			// write header in a packet
+			binary.Write(buf, binary.LittleEndian, []int32{r.RequestType, int32(len(r.Body)), requestID})
+			// write body in a packet
+			buf.Write(r.Body)
+			conn.requests.Set(string(requestID), r.Chan)
+			_, err = conn.connection.Write(buf.Bytes())
 			if err != nil {
 				panic(err)
 			}
+			buf.Reset()
 		}
 	}
 }

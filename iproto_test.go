@@ -1,14 +1,13 @@
 package iproto
 
 import (
-	"bytes"
 	"testing"
 	"time"
 )
 
 func TestConnect(t *testing.T) {
 	var (
-		rid      int32
+		rtype    int32
 		response *Response
 		err      error
 		conn     *IProto
@@ -21,21 +20,15 @@ func TestConnect(t *testing.T) {
 
 	body := []byte("iproto test message")
 	rtype = 17
-	response, err = conn.Request(rtype, body)
-	if err != nil {
-		t.Errorf("Error: %s", err.Error())
-	}
+	response = conn.Request(rtype, body)
 	if response.RequestType != rtype {
-		t.Errorf("Error: requestType should be %d, not %d", rid, response.requestType)
+		t.Errorf("Error: requestType should be %d, not %d", rtype, response.RequestType)
 	}
 
 	rtype = 20
-	response, err = conn.Request(rtype, body)
-	if err != nil {
-		t.Errorf("Error: %s", err.Error())
-	}
-	if response.requestType != rtype {
-		t.Errorf("Error: requestType should be %d, not %d", rid, response.requestType)
+	response = conn.Request(rtype, body)
+	if response.RequestType != rtype {
+		t.Errorf("Error: requestType should be %d, not %d", rtype, response.RequestType)
 	}
 
 }
