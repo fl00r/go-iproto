@@ -1,12 +1,13 @@
 # iProto
 
 Asynchronous mail.ru iproto protocol implementation on Go.
+Thread safe.
 
 ## Protocol
 
 ```
 <request> | <response> := <header><body>
-<header> = <type:int32><body_length:int32><request_id:int32>
+<header> = <type:uint32><body_length:uint32><request_id:uint32>
 ```
 
 ## Usage
@@ -21,7 +22,7 @@ import (
 )
 
 func main() {
-	var requestType int32 = 100
+	var requestType uint32 = 100
 	body := []byte("iproto test message")
 
 	conn := iproto.Connect("localhost:33013", 2*time.Minute)
