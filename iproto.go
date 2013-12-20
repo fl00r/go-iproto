@@ -108,7 +108,7 @@ func (conn *IProto) Request(requestType int32, body []byte) *Response {
 func (conn *IProto) read() {
 	var (
 		err    error
-		ch     chan *Response
+		ch     chan<- *Response
 		isChan bool
 	)
 	/*
@@ -140,7 +140,7 @@ func (conn *IProto) read() {
 				panic(err)
 			}
 
-			ch, isChan = conn.requests.Del(string(header[2])).(chan *Response)
+			ch, isChan = conn.requests.Del(string(header[2])).(chan<- *Response)
 			if isChan {
 				ch <- &Response{header[0], bodyBuf}
 			}
