@@ -3,6 +3,7 @@ package iproto
 import (
 	"bytes"
 	"testing"
+	"time"
 )
 
 func TestConnect(t *testing.T) {
@@ -13,7 +14,7 @@ func TestConnect(t *testing.T) {
 		conn     *IProto
 	)
 
-	conn, err = Connect("localhost:33013")
+	conn, err = Connect("localhost:33013", 5*time.Minute)
 	if err != nil {
 		t.Errorf("Error: %s", err.Error())
 	}

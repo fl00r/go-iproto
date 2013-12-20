@@ -17,13 +17,14 @@ package main
 import (
 	"fmt"
 	"github.com/Cergoo/go-iproto"
+	"time"
 )
 
 func main() {
 	var requestType int32 = 100
 	body := []byte("iproto test message")
 
-	conn := iproto.Connect("localhost:33013")
+	conn := iproto.Connect("localhost:33013", 2*time.Minute)
 	resp, err = conn.Request(requestType, body)
 
 	fmt.Println("responseBody:", resp.Body)
