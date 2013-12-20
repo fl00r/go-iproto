@@ -25,7 +25,7 @@ func main() {
 	body := []byte("iproto test message")
 
 	conn := iproto.Connect("localhost:33013", 2*time.Minute)
-	resp, err = conn.Request(requestType, body)
+	resp := conn.Request(requestType, body)
 
 	fmt.Println("responseBody:", resp.Body)
 }
