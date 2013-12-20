@@ -61,7 +61,7 @@ func Connect(addr string, timeout time.Duration) (connection *IProto, err error)
 	connection = &IProto{
 		addr:        addr,
 		connection:  conn,
-		chan_writer: make(chan []byte),
+		chan_writer: make(chan []byte, 100),
 		chan_stop:   make(chan bool),
 		requests:    cache.New(100, false, timeout, callback),
 	}
@@ -98,14 +98,13 @@ func (conn *IProto) Request(requestType int32, body []byte) *Response {
 func (conn *IProto) send(requestType int32, body []byte, chanToResponse chan *Response) {
 	packet := bytes.NewBuffer(make([]byte, 12+len(body)))
 	requestID := atomic.AddInt32(&conn.requestID, 1)
-	conn.requests.Set(string(requestID), chanToResponse)
 	// write header in a packet
 	binary.Write(packet, binary.LittleEndian, []int32{requestType, int32(len(body)), requestID})
 	// write body in a packet
 	packet.Write(body)
+	conn.requests.Set(string(requestID), chanToResponse)
 	// send request
 	conn.chan_writer <- packet.Bytes()
-	return
 }
 
 func (conn *IProto) read() {
