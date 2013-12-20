@@ -34,7 +34,7 @@ type IProto struct {
 type Request struct {
 	RequestType int32
 	Body        []byte
-	Chan        chan *Response
+	Chan        chan<- *Response
 }
 
 type Response struct {
@@ -85,15 +85,12 @@ func Connect(addr string, timeout time.Duration) (connection *IProto, err error)
 }
 
 // async request
-func (conn *IProto) RequestGo(requestType int32, body []byte) <-chan *Response {
-	ch := make(chan *Response, 2)
+func (conn *IProto) RequestGo(requestType int32, body []byte, ch chan<- *Response) {
 	conn.chan_writer <- &Request{
 		RequestType: requestType,
 		Body:        body,
 		Chan:        ch,
 	}
-	// no waiting response
-	return ch
 }
 
 // sync request
