@@ -7,7 +7,7 @@ import (
 
 func TestConnect(t *testing.T) {
 	var (
-		rtype    int32
+		rtype    uint32
 		response *Response
 		err      error
 		conn     *IProto

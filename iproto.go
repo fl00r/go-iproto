@@ -25,20 +25,20 @@ import (
 type IProto struct {
 	addr        string        //
 	connection  *net.TCPConn  //
-	requestID   int32         // counter
+	requestID   uint32        // counter
 	chan_writer chan *Request // chanel to wtite
 	chan_stop   chan bool     // chanel to stop all gorutines
 	requests    cache.Cache   // requests storage
 }
 
 type Request struct {
-	RequestType int32
+	RequestType uint32
 	Body        []byte
 	Chan        chan<- *Response
 }
 
 type Response struct {
-	RequestType int32
+	RequestType uint32
 	Body        []byte
 }
 
@@ -85,7 +85,7 @@ func Connect(addr string, timeout time.Duration) (connection *IProto, err error)
 }
 
 // async request
-func (conn *IProto) RequestGo(requestType int32, body []byte, ch chan<- *Response) {
+func (conn *IProto) RequestGo(requestType uint32, body []byte, ch chan<- *Response) {
 	conn.chan_writer <- &Request{
 		RequestType: requestType,
 		Body:        body,
@@ -94,7 +94,7 @@ func (conn *IProto) RequestGo(requestType int32, body []byte, ch chan<- *Respons
 }
 
 // sync request
-func (conn *IProto) Request(requestType int32, body []byte) *Response {
+func (conn *IProto) Request(requestType uint32, body []byte) *Response {
 	ch := make(chan *Response)
 	conn.chan_writer <- &Request{
 		RequestType: requestType,
@@ -116,7 +116,7 @@ func (conn *IProto) read() {
 		bodyLength  = header[1]
 		requestID   = header[2]
 	*/
-	header := make([]int32, 3)
+	header := make([]uint32, 3)
 	headerBuf := make([]byte, 12)
 	headerReader := bytes.NewReader(headerBuf)
 	for {
@@ -152,7 +152,7 @@ func (conn *IProto) write() {
 	var (
 		err       error
 		r         *Request
-		requestID int32
+		requestID uint32
 		buf       *bytes.Buffer
 	)
 
@@ -161,9 +161,9 @@ func (conn *IProto) write() {
 		case <-conn.chan_stop:
 			return
 		case r = <-conn.chan_writer:
-			requestID = atomic.AddInt32(&conn.requestID, 1)
+			requestID = atomic.AddUint32(&conn.requestID, 1)
 			// write header in a packet
-			binary.Write(buf, binary.LittleEndian, []int32{r.RequestType, int32(len(r.Body)), requestID})
+			binary.Write(buf, binary.LittleEndian, []uint32{r.RequestType, uint32(len(r.Body)), requestID})
 			// write body in a packet
 			buf.Write(r.Body)
 			conn.requests.Set(string(requestID), r.Chan)
